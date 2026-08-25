@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stegstr — Terminal Console v1.0.0</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo-icon">$&gt;</div>
+        <div class="brand-text">
+          <h2>STEGSTR</h2>
+          <span class="version-badge">v1.0.0_ROBUST_DCT</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-feed">
+          <span class="icon">[FEED]</span> Timeline Stream
+        </button>
+        <button class="nav-item" data-tab="tab-embed">
+          <span class="icon">[EMBED]</span> Carrier Encoder
+        </button>
+        <button class="nav-item" data-tab="tab-detect">
+          <span class="icon">[SCAN]</span> Payload Decoder
+        </button>
+        <button class="nav-item" data-tab="tab-messages">
+          <span class="icon">[DM]</span> Encrypted Messages
+        </button>
+        <button class="nav-item" data-tab="tab-relays">
+          <span class="icon">[NET]</span> Nostr Relays
+        </button>
+        <button class="nav-item" data-tab="tab-diagnostics">
+          <span class="icon">[DIAG]</span> System Benchmarks
+        </button>
+      </nav>
+
+      <div class="identity-card">
+        <div class="id-header">&gt; LOCAL NOSTR IDENTITY</div>
+        <div class="npub-truncated" id="display-npub">initialising...</div>
+        <button class="btn-sm btn-outline btn-block" id="btn-copy-npub">COPY NPUB KEY</button>
+      </div>
+    </aside>
+
+    <!-- Main Content Panel -->
+    <main class="main-content">
+      <!-- 1. FEED TIMELINE -->
+      <section id="tab-feed" class="tab-content active">
+        <div class="header-bar">
+          <h1>TIMELINE_STREAM</h1>
+          <button class="btn-primary" onclick="switchTab('tab-embed')">+ ENCODE_CARRIER</button>
+        </div>
+        <div class="card">
+          <textarea id="feed-post-text" class="form-control" rows="3" placeholder="stegstr@node-01:~$ Enter public Nostr note or steganographic text..."></textarea>
+          <div style="margin-top:12px; text-align:right;">
+            <button class="btn-secondary" id="btn-publish-note">PUBLISH_NOTE</button>
+          </div>
+        </div>
+        <div class="feed-container" id="feed-posts-list">
+          <div style="color:var(--term-cyan);">[SYS_LOG] Fetching event timeline feed...</div>
+        </div>
+      </section>
+
+      <!-- 2. EMBED PAYLOAD -->
+      <section id="tab-embed" class="tab-content">
+        <div class="header-bar">
+          <h1>STEGANOGRAPHIC_ENCODER</h1>
+        </div>
+        <div class="grid-2col">
+          <div class="card">
+            <div class="form-group">
+              <label>&gt; 1. SELECT COVER CARRIER MEDIA</label>
+              <div class="dropzone" id="embed-dropzone">
+                <input type="file" id="embed-file-input" accept="image/*" style="display:none;">
+                <div class="dropzone-text">
+                  <span class="upload-icon">[ UPLOAD ]</span>
+                  <p>Drop cover image here, or <strong>BROWSE_FILE</strong></p>
+                  <small style="color:var(--text-muted);">Format: JPEG / PNG / WebP (Mid-Frequency 2D-DCT QIM)</small>
+                </div>
+                <div id="embed-preview-container" class="preview-container" style="display:none;">
+                  <img id="embed-preview-img" src="" alt="Carrier preview">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>&gt; FEC ROBUSTNESS PROFILE</label>
+              <select id="embed-robustness" class="form-control">
+                <option value="balanced" selected>BALANCED (33% Reed-Solomon Redundancy — Social Media Ready)</option>
+                <option value="fast">FAST (14% Redundancy — Minimal Overhead)</option>
+                <option value="robust">ROBUST (60% Redundancy — Heavy Compression Survival)</option>
+                <option value="maximum">MAXIMUM (100% Redundancy — 1:1 Parity Ratio)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="form-group">
+              <label>&gt; 2. SECRET PAYLOAD CONTENT</label>
+              <textarea id="embed-message-text" rows="5" class="form-control" placeholder="stegstr@node-01:~$ Type secret Nostr message to embed inside image frequency coefficients..."></textarea>
+            </div>
+            
+            <div class="capacity-gauge">
+              <div class="gauge-label">
+                <span>ESTIMATED SAFE CAPACITY</span>
+                <span id="capacity-value">3844 / 3844 Bytes</span>
+              </div>
+              <div class="gauge-bar-bg">
+                <div class="gauge-bar-fill" id="capacity-fill" style="width: 40%;"></div>
+              </div>
+            </div>
+
+            <button class="btn-primary btn-block" id="btn-embed-action" style="margin-top:20px;">🔒 EXECUTE EMBEDDING &amp; GENERATE CARRIER</button>
+            
+            <div id="embed-result-card" class="card" style="display:none; margin-top:20px; border-color:var(--term-green);">
+              <h4 style="color:var(--term-green); margin-bottom:12px;">✅ STEGANOGRAPHIC ENCODING SUCCESSFUL</h4>
+              <div class="metric-row">
+                <span>Codec Engine:</span> <strong id="res-codec">--</strong>
+              </div>
+              <div class="metric-row">
+                <span>Visual Quality (PSNR):</span> <strong id="res-psnr">-- dB</strong>
+              </div>
+              <div class="metric-row">
+                <span>Structural Similarity (SSIM):</span> <strong id="res-ssim">--</strong>
+              </div>
+              <a id="res-download-link" href="#" download="stego_carrier.png" class="btn-secondary btn-block" style="margin-top:14px; text-align:center; display:block; text-decoration:none;">💾 DOWNLOAD CARRIER IMAGE</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. DETECT & EXTRACT -->
+      <section id="tab-detect" class="tab-content">
+        <div class="header-bar">
+          <h1>PAYLOAD_DECODER_SCANNER</h1>
+        </div>
+        <div class="card">
+          <div class="dropzone" id="detect-dropzone">
+            <input type="file" id="detect-file-input" accept="image/*" style="display:none;">
+            <div class="dropzone-text">
+              <span class="upload-icon">[ SCAN ]</span>
+              <p>Upload or drag &amp; drop carrier image to scan for hidden Stegstr payloads</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="detect-results-card" class="card" style="display:none; margin-top:20px;">
+          <h3 style="color:var(--term-green); margin-bottom:15px;">DECRYPTION_SCANNER_RESULTS</h3>
+          <div id="detect-status-badge" class="badge">--</div>
+          <div id="detect-output-details" style="margin-top:15px;"></div>
+        </div>
+      </section>
+
+      <!-- 4. DIRECT MESSAGES -->
+      <section id="tab-messages" class="tab-content">
+        <div class="header-bar">
+          <h1>ENCRYPTED_DIRECT_MESSAGES</h1>
+        </div>
+        <div class="card">
+          <h3 style="color:var(--term-green); margin-bottom:15px;">&gt; SEND ENCRYPTED MESSAGE (NIP-04 E2EE)</h3>
+          <div class="form-group">
+            <label>&gt; RECIPIENT PUBLIC KEY (npub or hex)</label>
+            <input type="text" id="dm-recipient" class="form-control" placeholder="npub1... or hex public key">
+          </div>
+          <div class="form-group">
+            <label>&gt; ENCRYPTED MESSAGE CONTENT</label>
+            <textarea id="dm-text" class="form-control" rows="3" placeholder="stegstr@node-01:~$ Type private message for ECDH + ChaCha20 encryption..."></textarea>
+          </div>
+          <button class="btn-primary" id="btn-send-dm">SEND ENCRYPTED DM</button>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <h3 style="color:var(--term-cyan);">&gt; ENCRYPTED CONVERSATIONS &amp; INBOX</h3>
+            <button class="btn-secondary btn-sm" id="btn-refresh-dms">🔄 REFRESH INBOX</button>
+          </div>
+          <div id="dm-inbox-container">
+            <div style="color:var(--text-muted); font-size:13px;">Loading encrypted message threads...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. NOSTR RELAYS -->
+      <section id="tab-relays" class="tab-content">
+        <div class="header-bar">
+          <h1>NOSTR_RELAY_POOL</h1>
+          <button class="btn-secondary" id="btn-test-relays">⚡ TEST ALL RELAYS</button>
+        </div>
+        <div class="card">
+          <table class="relay-table">
+            <thead>
+              <tr>
+                <th>RELAY WEBSOCKET URL</th>
+                <th>STATE</th>
+                <th>LATENCY</th>
+              </tr>
+            </thead>
+            <tbody id="relay-table-body">
+              <tr><td colspan="3" style="color:var(--term-cyan);">Querying active relays...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 6. DIAGNOSTICS & BENCHMARKS -->
+      <section id="tab-diagnostics" class="tab-content">
+        <div class="header-bar">
+          <h1>SYSTEM_DIAGNOSTICS &amp; BENCHMARKS</h1>
+        </div>
+        <div class="card">
+          <h3 style="color:var(--term-green); margin-bottom:10px;">Steganographic Robustness Benchmark Suite</h3>
+          <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">Simulates JPEG Q95-Q45 compression, WebP transcode, resizing, metadata stripping, and 3x repeated recompression.</p>
+          <div class="form-group">
+            <input type="file" id="benchmark-file-input" accept="image/*" class="form-control">
+          </div>
+          <button class="btn-primary" id="btn-run-benchmark">🚀 EXECUTE BENCHMARK SUITE</button>
+
+          <div id="benchmark-results-container" style="margin-top:20px; display:none;">
+            <h4 style="color:var(--term-green); font-size:16px;">OVERALL ROBUSTNESS SCORE: <span id="benchmark-score" style="color:var(--term-cyan);">--%</span></h4>
+            <div id="benchmark-metrics-table"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

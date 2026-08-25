@@ -1,0 +1,10 @@
+services:
+  stegstr-app:
+    build: .
+    container_name: stegstr-service
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    command: python3 -m stegstr.api.server

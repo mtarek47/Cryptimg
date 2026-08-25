@@ -1,0 +1,171 @@
+===============================================================================
+STEGSTR — PROJECT IMPLEMENTATION GUIDELINES & MOBILE INTEGRATION BLUEPRINT
+===============================================================================
+Version: 1.0.0_ROBUST_DCT
+Date: 2026-08-18
+Author: Stegstr Core Architecture Team
+
+-------------------------------------------------------------------------------
+TABLE OF CONTENTS
+-------------------------------------------------------------------------------
+1. SYSTEM ARCHITECTURE & COMPONENT OVERVIEW
+2. CORE STEGANOGRAPHIC ENGINE & ROBUSTNESS STRATEGY
+3. NETWORKING, NOSTR PROTOCOL & PERSISTENCE
+4. AI AGENT OPERABILITY & HEADLESS AUTOMATION
+5. DEPLOYMENT & CONTAINERIZATION GUIDELINES
+6. MOBILE APPLICATION INTEGRATION BLUEPRINT (iOS & Android)
+
+
+===============================================================================
+1. SYSTEM ARCHITECTURE & COMPONENT OVERVIEW
+===============================================================================
+Stegstr is an open-source steganographic framework and Nostr client engineered
+to hide encrypted micro-blogging notes and direct messages inside standard 
+JPEG, PNG, and WebP media files.
+
+[USER & AGENT INTERFACES]
+├── Headless CLI: stegstr-cli (--json support)
+├── Web UI Dashboard: http://127.0.0.1:8765/app
+└── REST API Server: http://127.0.0.1:8765/api/v1 (FastAPI + Swagger)
+
+[STEGSTR CORE ENGINE]
+├── STG2 Binary Protocol Header (121 bytes, zlib compression, CRC32)
+├── Reed-Solomon Forward Error Correction (Fast, Balanced, Robust, Maximum)
+├── ChaCha20 + HMAC-SHA256 Authenticated Encryption
+└── Nostr Engine (NIP-01 events, BIP-340 Schnorr, NIP-04/NIP-44 DMs)
+
+[STEGANOGRAPHIC CODEC STACK]
+├── Robust Mid-Frequency 2D-DCT QIM Codec (JPEG/WebP/PNG)
+├── Legacy PNG LSB Codec (Stegstr V1 compatibility)
+└── Carrier Analyzer (Sobel texture scoring, PSNR, SSIM evaluation)
+
+[STORAGE & NETWORKING]
+├── SQLite Database: data/stegstr.db
+└── Async WebSocket Relay Manager (Damus, Nos.lol, Nostr.band, Nostr.mom)
+
+
+===============================================================================
+2. CORE STEGANOGRAPHIC ENGINE & ROBUSTNESS STRATEGY
+===============================================================================
+2.1 MID-FREQUENCY 2D-DCT QUANTIZATION INDEX MODULATION (QIM)
+To survive aggressive real-world social media compression pipelines (WhatsApp,
+Telegram, Instagram), Stegstr embeds payload bits into luminance (Y) channel 
+AC coefficients across 8x8 Discrete Cosine Transform (DCT) blocks:
+
+   Quantization Decision Boundary: Q = Delta * round(C / Delta) + bit * (Delta / 2)
+
+- Quantization Step Size (Delta): Default Delta = 32.0 (or 48.0 for robust mode).
+  This allows bit decision boundaries to easily overcome round-off noise
+  introduced by integer RGB pixel conversions.
+- Barker-13 Synchronization Sequence: Frame boundaries are marked using 13-bit
+  Barker sequences (1111100110101) for exact payload alignment.
+
+2.2 REED-SOLOMON ERROR CORRECTION & MATRIX INTERLEAVING
+- Redundancy Profiles:
+  * fast     : 14% parity redundancy
+  * balanced : 33% parity redundancy (recommended for social media)
+  * robust   : 60% parity redundancy (heavy compression survival)
+  * maximum  : 100% parity ratio
+- Matrix Byte Interleaving: Permutation scatters contiguous payload bytes across
+  distant DCT blocks, preventing localized cropping or compression artifacts from
+  destroying contiguous payload blocks.
+
+
+===============================================================================
+3. NETWORKING, NOSTR PROTOCOL & PERSISTENCE
+===============================================================================
+- Nostr BIP-340 Schnorr Signatures: Secp256k1 implementation enforcing even-Y
+  coordinate point normalization.
+- NIP-04 / NIP-44 Encrypted DMs: Elliptic Curve Diffie-Hellman (ECDH) key agreement
+  combined with ChaCha20-Poly1305 authenticated stream cipher.
+- Relay Manager: Asynchronous WebSocket connection pool with auto-reconnect,
+  exponential backoff, and event deduplication.
+- Local Persistence: SQLite database at data/stegstr.db storing keys, timeline
+  notes, relays, and offline queue.
+
+
+===============================================================================
+4. AI AGENT OPERABILITY & HEADLESS AUTOMATION
+===============================================================================
+All stegstr-cli subcommands support machine-readable JSON output:
+
+1. Encode Carrier Image:
+   ./stegstr-cli encode carrier.jpg -m "Secret Payload" -o stego.jpg --json
+
+2. Decode Carrier Image:
+   ./stegstr-cli decode stego.jpg --json
+
+3. Batch Detection Scanner:
+   ./stegstr-cli detect ./images/ --json
+
+4. Robustness Benchmark Suite:
+   ./stegstr-cli benchmark sample.jpg --json
+
+Discovery schemas are documented in agents.txt and AGENTS.md.
+
+
+===============================================================================
+5. DEPLOYMENT & CONTAINERIZATION GUIDELINES
+===============================================================================
+5.1 DOCKER COMPOSE EXECUTION
+The application is fully containerized with Dockerfile and docker-compose.yml:
+
+- Build and start background daemon:
+  docker compose up -d --build
+
+- View container logs:
+  docker compose logs -f
+
+- Run test suite inside container:
+  docker exec stegstr-service ./scripts/test.sh
+
+5.2 HELPER SCRIPTS
+- ./scripts/dev.sh       : Starts local dev server at http://127.0.0.1:8765
+- ./scripts/test.sh      : Runs 16/16 test suite
+- ./scripts/benchmark.sh : Executes automated media transformation benchmark suite
+
+
+===============================================================================
+6. MOBILE APPLICATION INTEGRATION BLUEPRINT (iOS & Android)
+===============================================================================
+6.1 ARCHITECTURE OPTIONS FOR MOBILE (React Native / Flutter / Swift / Kotlin)
+
+Option A: C/C++ Shared Library via FFI (Highest Performance)
+- Compile the 2D-DCT algorithm and Reed-Solomon FEC into a lightweight native
+  library (libstegstr.so for Android, libstegstr.dylib / framework for iOS).
+- Use dart:ffi (Flutter) or JNI / Swift C-interop (React Native / Native) to call
+  embedding and extraction at 60 FPS directly on raw camera frame buffers.
+
+Option B: Embedded REST API Sidecar (Quickest Implementation)
+- Package the Python engine or Go/C++ port as a background daemon process running
+  on http://127.0.0.1:8765 inside the mobile container.
+- Mobile UI makes standard HTTP fetch() calls to /api/v1/encode, /api/v1/decode,
+  and /api/v1/messages.
+
+6.2 KEY MOBILE FEATURES & WORKFLOWS
+
+1. Steganographic Camera & Instant Share Sheet:
+   - User takes a photo inside the mobile app.
+   - App automatically embeds their latest Nostr note or encrypted DM into the photo.
+   - One-click native share sheet to send directly to WhatsApp, Telegram, Instagram.
+
+2. Background Gallery Detection Worker:
+   - Background worker (iOS BackgroundTasks / Android WorkManager) scans photos
+     saved to the camera roll.
+   - If a STG2 magic header is detected, the app extracts the secret payload and
+     triggers a local notification:
+     "📩 Secret Stegstr payload extracted from incoming photo!"
+
+3. Hardware Security & Biometrics:
+   - Store Nostr nsec private keys inside the iOS Keychain or Android KeyStore
+     using hardware-backed Secure Enclave.
+   - Require FaceID / TouchID / Fingerprint authentication before revealing
+     decrypted Kind 4 DMs or executing BIP-340 signatures.
+
+4. Mobile Media Compression Guard:
+   - Pre-scale images to standard dimensions (e.g., 1024x1024) before embedding
+     to ensure DCT mid-frequency coefficients remain intact during native OS sharing.
+
+===============================================================================
+END OF GUIDELINES DOCUMENT
+===============================================================================

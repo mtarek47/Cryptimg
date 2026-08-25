@@ -1,0 +1,102 @@
+===============================================================================
+STEGSTR — PRODUCTION DEPLOYMENT GUIDELINES
+===============================================================================
+Version: 1.0.0
+Date: 2026-08-18
+
+-------------------------------------------------------------------------------
+1. QUICK START WITH DOCKER COMPOSE (RECOMMENDED)
+-------------------------------------------------------------------------------
+1. Clone Repository & Create Data Directory:
+   git clone https://github.com/your-org/stegstr.git
+   cd stegstr
+   mkdir -p data
+
+2. Build & Start Service:
+   docker compose up -d --build
+
+3. Verify Container Health:
+   docker compose ps
+   docker compose logs -f
+   curl http://127.0.0.1:8765/api/v1/status
+
+
+-------------------------------------------------------------------------------
+2. BARE-METAL / VPS SYSTEMD DEPLOYMENT (UBUNTU / DEBIAN)
+-------------------------------------------------------------------------------
+1. Install Dependencies:
+   sudo apt update && sudo apt install -y python3 python3-pip python3-venv git libjpeg-dev zlib1g-dev
+
+2. Setup User & Virtual Environment:
+   sudo useradd -m -s /bin/bash stegstr
+   sudo mkdir -p /opt/stegstr /var/lib/stegstr/data
+   sudo chown -R stegstr:stegstr /opt/stegstr /var/lib/stegstr
+
+   sudo -u stegstr git clone https://github.com/your-org/stegstr.git /opt/stegstr
+   cd /opt/stegstr
+   sudo -u stegstr python3 -m venv venv
+   sudo -u stegstr ./venv/bin/pip install --no-cache-dir numpy pillow ecdsa fastapi uvicorn pydantic python-multipart
+
+3. Create Systemd Unit (/etc/systemd/system/stegstr.service):
+   [Unit]
+   Description=Stegstr API Server & Web UI Engine
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=stegstr
+   Group=stegstr
+   WorkingDirectory=/opt/stegstr
+   Environment="STEGSTR_DATA_DIR=/var/lib/stegstr/data"
+   ExecStart=/opt/stegstr/venv/bin/python3 -m stegstr.api.server
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+
+4. Start Service:
+   sudo systemctl daemon-reload
+   sudo systemctl enable stegstr
+   sudo systemctl start stegstr
+
+
+-------------------------------------------------------------------------------
+3. NGINX REVERSE PROXY & SSL (HTTPS / WSS) SETUP
+-------------------------------------------------------------------------------
+1. Install Nginx & Certbot:
+   sudo apt install -y nginx certbot python3-certbot-nginx
+
+2. Nginx Site Config (/etc/nginx/sites-available/stegstr):
+   server {
+       server_name stegstr.yourdomain.com;
+       client_max_body_size 50M;
+
+       location / {
+           proxy_pass http://127.0.0.1:8765;
+           proxy_http_version 1.1;
+           proxy_set_header Upgrade $http_upgrade;
+           proxy_set_header Connection "upgrade";
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+
+3. Enable Site & Issue Free SSL:
+   sudo ln -s /etc/nginx/sites-available/stegstr /etc/nginx/sites-enabled/
+   sudo systemctl reload nginx
+   sudo certbot --nginx -d stegstr.yourdomain.com
+
+
+-------------------------------------------------------------------------------
+4. VERIFICATION COMMANDS
+-------------------------------------------------------------------------------
+curl -s https://stegstr.yourdomain.com/api/v1/status
+curl -s https://stegstr.yourdomain.com/api/v1/relays
+./stegstr-cli test --json
+
+===============================================================================
+END OF DEPLOYMENT GUIDELINES
+===============================================================================

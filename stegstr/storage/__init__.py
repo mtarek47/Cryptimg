@@ -1,0 +1,3 @@
+"""
+Stegstr Storage Module
+"""

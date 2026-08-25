@@ -1,0 +1,3 @@
+"""
+Stegstr Core Module
+"""
