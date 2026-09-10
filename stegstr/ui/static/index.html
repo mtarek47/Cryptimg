@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stegstr — Terminal Console v1.0.0</title>
+  <title>Crypt — Terminal Console v1.0.0</title>
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
       <div class="brand">
         <div class="logo-icon">$&gt;</div>
         <div class="brand-text">
-          <h2>STEGSTR</h2>
+          <h2>CRYPT</h2>
           <span class="version-badge">v1.0.0_ROBUST_DCT</span>
         </div>
       </div>
@@ -43,6 +43,7 @@
         <div class="id-header">&gt; LOCAL NOSTR IDENTITY</div>
         <div class="npub-truncated" id="display-npub">initialising...</div>
         <button class="btn-sm btn-outline btn-block" id="btn-copy-npub">COPY NPUB KEY</button>
+        <button class="btn-sm btn-outline btn-block" id="btn-new-identity" style="margin-top:6px; border-color:var(--term-cyan); color:var(--term-cyan);">🔄 NEW IDENTITY</button>
       </div>
     </aside>
 
@@ -51,11 +52,14 @@
       <!-- 1. FEED TIMELINE -->
       <section id="tab-feed" class="tab-content active">
         <div class="header-bar">
-          <h1>TIMELINE_STREAM</h1>
+          <div>
+            <h1 style="margin-bottom:2px;">TIMELINE_STREAM</h1>
+            <span style="font-size:11px; color:var(--term-amber);">&gt; AUTO-PURGE ACTIVE: Messages automatically expire after 24 hours</span>
+          </div>
           <button class="btn-primary" onclick="switchTab('tab-embed')">+ ENCODE_CARRIER</button>
         </div>
         <div class="card">
-          <textarea id="feed-post-text" class="form-control" rows="3" placeholder="stegstr@node-01:~$ Enter public Nostr note or steganographic text..."></textarea>
+          <textarea id="feed-post-text" class="form-control" rows="3" placeholder="crypt@node-01:~$ Enter public Nostr note or steganographic text..."></textarea>
           <div style="margin-top:12px; text-align:right;">
             <button class="btn-secondary" id="btn-publish-note">PUBLISH_NOTE</button>
           </div>
@@ -101,7 +105,7 @@
           <div class="card">
             <div class="form-group">
               <label>&gt; 2. SECRET PAYLOAD CONTENT</label>
-              <textarea id="embed-message-text" rows="5" class="form-control" placeholder="stegstr@node-01:~$ Type secret Nostr message to embed inside image frequency coefficients..."></textarea>
+              <textarea id="embed-message-text" rows="5" class="form-control" placeholder="crypt@node-01:~$ Type secret Nostr message to embed inside image frequency coefficients..."></textarea>
             </div>
             
             <div class="capacity-gauge">
@@ -143,7 +147,7 @@
             <input type="file" id="detect-file-input" accept="image/*" style="display:none;">
             <div class="dropzone-text">
               <span class="upload-icon">[ SCAN ]</span>
-              <p>Upload or drag &amp; drop carrier image to scan for hidden Stegstr payloads</p>
+              <p>Upload or drag &amp; drop carrier image to scan for hidden Crypt payloads</p>
             </div>
           </div>
         </div>
@@ -168,7 +172,7 @@
           </div>
           <div class="form-group">
             <label>&gt; ENCRYPTED MESSAGE CONTENT</label>
-            <textarea id="dm-text" class="form-control" rows="3" placeholder="stegstr@node-01:~$ Type private message for ECDH + ChaCha20 encryption..."></textarea>
+            <textarea id="dm-text" class="form-control" rows="3" placeholder="crypt@node-01:~$ Type private message for ECDH + ChaCha20 encryption..."></textarea>
           </div>
           <button class="btn-primary" id="btn-send-dm">SEND ENCRYPTED DM</button>
         </div>

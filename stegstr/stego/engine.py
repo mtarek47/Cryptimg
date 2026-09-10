@@ -6,6 +6,7 @@ multi-codec detection scanning, and legacy PNG compatibility fallback.
 """
 
 import os
+import struct
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Union, Tuple
 from PIL import Image
@@ -14,7 +15,7 @@ from stegstr.stego.codecs.base import BaseStegoCodec, StegoCodecError
 from stegstr.stego.codecs.lsb_png import LosslessPNGCodec
 from stegstr.stego.codecs.robust_dct import RobustDCTCodec
 from stegstr.stego.carrier_analyzer import analyze_carrier, compute_psnr, compute_ssim
-from stegstr.core.binary_protocol import StegstrPacket, BinaryProtocolError
+from stegstr.core.binary_protocol import StegstrPacket, BinaryProtocolError, HEADER_FORMAT, HEADER_SIZE
 from stegstr.core.fec import ReedSolomonFEC, interleave_bytes, deinterleave_bytes
 from stegstr.config import MODE_LEGACY_PNG, MODE_ROBUST_DCT, LEGACY_MAGIC, MAGIC_HEADER
 
@@ -65,6 +66,12 @@ class StegEngine:
         else:
             img = image_input
             src_path = "memory"
+
+        # Auto-rescale high-resolution images to prevent server OOM and excessive latency
+        MAX_DIM = 1920
+        if max(img.size) > MAX_DIM:
+            img = img.copy()
+            img.thumbnail((MAX_DIM, MAX_DIM), Image.Resampling.LANCZOS)
 
         analysis = analyze_carrier(img)
 
@@ -147,37 +154,53 @@ class StegEngine:
             img = image_input
             src_name = "memory"
 
-        # Step 1: Try Robust DCT Codec with multiple candidate quantization steps
+        # Step 1: Try Robust DCT Codec with candidate quantization steps
         dct_codec = self.codecs[MODE_ROBUST_DCT]
+        PROBE_BYTES = 512
         for q_step in [32.0, 48.0, 64.0, 24.0]:
             try:
-                extracted_raw = dct_codec.decode(img, parameters={"quant_step": q_step})
+                # Fast probe of initial blocks to find MAGIC_HEADER without decoding entire carrier
+                probe_raw = dct_codec.decode(img, parameters={"quant_step": q_step, "expected_len": PROBE_BYTES})
                 
-                if MAGIC_HEADER in extracted_raw:
-                    idx = extracted_raw.find(MAGIC_HEADER)
-                    packet_data = extracted_raw[idx:]
-                    packet = StegstrPacket.unpack(packet_data)
-                    
-                    rob_bits = packet.flags & 0x0C
-                    robustness_level = FLAG_ROBUSTNESS_REVERSE_MAP.get(rob_bits, "balanced")
-                    
-                    fec = ReedSolomonFEC(robustness_level=robustness_level)
-                    deinterleaved = deinterleave_bytes(packet.payload, stride=16)
-                    
-                    target_len = len(deinterleaved) // (fec.copies + 1)
-                    try:
-                        payload = fec.decode(deinterleaved, target_length=target_len)
-                        payload = payload.rstrip(b"\x00")
-                    except Exception:
-                        payload = packet.payload
+                if MAGIC_HEADER in probe_raw:
+                    idx = probe_raw.find(MAGIC_HEADER)
+                    header_slice = probe_raw[idx:idx + HEADER_SIZE]
+                    needed_total = None
+                    if len(header_slice) >= HEADER_SIZE:
+                        try:
+                            (_, _, _, _, _, _, _, _, _, _, _, payload_len) = struct.unpack(HEADER_FORMAT, header_slice)
+                            needed_total = idx + HEADER_SIZE + payload_len + 20
+                        except Exception:
+                            pass
 
-                    return {
-                        "status": "FOUND",
-                        "codec": dct_codec.name,
-                        "packet": packet,
-                        "payload": payload,
-                        "source": src_name
-                    }
+                    # Extract only the exact required bytes for the packet
+                    extracted_raw = dct_codec.decode(img, parameters={"quant_step": q_step, "expected_len": needed_total})
+                    
+                    if MAGIC_HEADER in extracted_raw:
+                        idx = extracted_raw.find(MAGIC_HEADER)
+                        packet_data = extracted_raw[idx:]
+                        packet = StegstrPacket.unpack(packet_data)
+                        
+                        rob_bits = packet.flags & 0x0C
+                        robustness_level = FLAG_ROBUSTNESS_REVERSE_MAP.get(rob_bits, "balanced")
+                        
+                        fec = ReedSolomonFEC(robustness_level=robustness_level)
+                        deinterleaved = deinterleave_bytes(packet.payload, stride=16)
+                        
+                        target_len = len(deinterleaved) // (fec.copies + 1)
+                        try:
+                            payload = fec.decode(deinterleaved, target_length=target_len)
+                            payload = payload.rstrip(b"\x00")
+                        except Exception:
+                            payload = packet.payload
+
+                        return {
+                            "status": "FOUND",
+                            "codec": dct_codec.name,
+                            "packet": packet,
+                            "payload": payload,
+                            "source": src_name
+                        }
             except Exception:
                 continue
 

@@ -13,10 +13,10 @@ import numpy as np
 
 def compute_psnr(original: Image.Image, stego: Image.Image) -> float:
     """Compute Peak Signal-to-Noise Ratio (PSNR) in dB between original and stego image."""
-    arr1 = np.array(original.convert("RGB"), dtype=np.float64)
-    arr2 = np.array(stego.convert("RGB"), dtype=np.float64)
+    arr1 = np.array(original.convert("RGB"), dtype=np.float32)
+    arr2 = np.array(stego.convert("RGB"), dtype=np.float32)
 
-    mse = np.mean((arr1 - arr2) ** 2)
+    mse = float(np.mean((arr1 - arr2) ** 2))
     if mse == 0:
         return 100.0  # Infinite PSNR (identical images)
 
@@ -27,20 +27,32 @@ def compute_psnr(original: Image.Image, stego: Image.Image) -> float:
 
 def compute_ssim(original: Image.Image, stego: Image.Image) -> float:
     """Compute simplified Structural Similarity Index (SSIM) between original and stego image."""
-    img1 = np.array(original.convert("L"), dtype=np.float64)
-    img2 = np.array(stego.convert("L"), dtype=np.float64)
+    img1 = np.array(original.convert("L"), dtype=np.float32)
+    img2 = np.array(stego.convert("L"), dtype=np.float32)
+
+    # Subsample if large to save memory and calculation time
+    if img1.size > 500000:
+        step = int(math.ceil(math.sqrt(img1.size / 250000)))
+        img1 = img1[::step, ::step]
+        img2 = img2[::step, ::step]
 
     C1 = (0.01 * 255) ** 2
     C2 = (0.03 * 255) ** 2
 
-    mu1 = np.mean(img1)
-    mu2 = np.mean(img2)
+    mu1 = float(np.mean(img1))
+    mu2 = float(np.mean(img2))
 
-    sigma1_sq = np.var(img1)
-    sigma2_sq = np.var(img2)
-    sigma12 = np.cov(img1.flatten(), img2.flatten())[0, 1]
+    sigma1_sq = float(np.var(img1))
+    sigma2_sq = float(np.var(img2))
+    
+    # Fast covariance calculation without large matrix allocations
+    f1 = img1.ravel() - mu1
+    f2 = img2.ravel() - mu2
+    sigma12 = float(np.mean(f1 * f2))
 
-    ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+    num = (2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)
+    den = (mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2)
+    ssim = num / den if den != 0 else 1.0
     return float(np.clip(ssim, 0.0, 1.0))
 
 
@@ -52,17 +64,18 @@ def analyze_carrier(image: Image.Image) -> Dict[str, Any]:
     width, height = image.size
     total_pixels = width * height
     
-    # 1. Texture Analysis (Sobel Gradient Variance)
-    gray = np.array(image.convert("L"), dtype=np.float64)
+    # Subsample large images for texture analysis to avoid huge memory allocations
+    if total_pixels > 500000:
+        thumb = image.copy()
+        thumb.thumbnail((800, 800), Image.Resampling.BOX)
+        gray = np.array(thumb.convert("L"), dtype=np.float32)
+    else:
+        gray = np.array(image.convert("L"), dtype=np.float32)
     
-    # Sobel gradients
-    gx = np.zeros_like(gray)
-    gy = np.zeros_like(gray)
-    gx[:, :-1] = np.abs(gray[:, 1:] - gray[:, :-1])
-    gy[:-1, :] = np.abs(gray[1:, :] - gray[:-1, :])
-    
-    gradient_mag = np.sqrt(gx**2 + gy**2)
-    texture_score = float(np.mean(gradient_mag))
+    # Fast Sobel gradients
+    gx = np.abs(gray[:, 1:] - gray[:, :-1])
+    gy = np.abs(gray[1:, :] - gray[:-1, :])
+    texture_score = float((np.mean(gx) + np.mean(gy)) / 2.0)
     
     # 2. Capacity Estimates
     # Robust DCT capacity (8 bits per 8x8 block)

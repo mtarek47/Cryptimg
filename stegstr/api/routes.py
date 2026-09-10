@@ -6,7 +6,7 @@ import io
 import json
 import base64
 from typing import Dict, Any, Optional, List
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Header
 from pydantic import BaseModel
 from PIL import Image
 
@@ -25,6 +25,29 @@ db = DatabaseManager()
 pool = RelayPoolManager(db)
 
 
+def resolve_keypair(key_str: Optional[str] = None) -> NostrKeyPair:
+    if key_str:
+        clean = key_str.strip()
+        try:
+            if clean.startswith("nsec"):
+                return NostrKeyPair.from_nsec(clean)
+            return NostrKeyPair(clean)
+        except Exception:
+            pass
+    return db.get_active_identity()
+
+
+@router.post("/identity/new")
+def api_generate_identity() -> Dict[str, Any]:
+    kp = NostrKeyPair()
+    return {
+        "pubkey": kp.public_key_hex,
+        "privkey": kp.private_key_hex,
+        "npub": kp.npub,
+        "nsec": kp.nsec
+    }
+
+
 class PostNoteRequest(BaseModel):
     text: str
 
@@ -41,11 +64,11 @@ class EncodeRequest(BaseModel):
 
 
 @router.get("/status")
-def get_status() -> Dict[str, Any]:
-    active_kp = db.get_active_identity()
+def get_status(x_nostr_privkey: Optional[str] = Header(None)) -> Dict[str, Any]:
+    active_kp = resolve_keypair(x_nostr_privkey)
     return {
         "status": "ONLINE",
-        "system": "Stegstr Engine V2",
+        "system": "Crypt Engine V2",
         "identity": {
             "npub": active_kp.npub,
             "pubkey": active_kp.public_key_hex
@@ -70,9 +93,9 @@ def api_test_relays() -> List[Dict[str, Any]]:
 
 
 @router.post("/posts")
-def api_post_note(req: PostNoteRequest) -> Dict[str, Any]:
+def api_post_note(req: PostNoteRequest, x_nostr_privkey: Optional[str] = Header(None)) -> Dict[str, Any]:
     try:
-        kp = db.get_active_identity()
+        kp = resolve_keypair(x_nostr_privkey)
         evt = NostrEvent.create_text_note(kp, req.text)
         db.save_event(evt)
         return {
@@ -86,18 +109,52 @@ def api_post_note(req: PostNoteRequest) -> Dict[str, Any]:
         }
 
 
+@router.post("/posts/{event_id}/unsend")
+def api_unsend_note(event_id: str, x_nostr_privkey: Optional[str] = Header(None)) -> Dict[str, Any]:
+    try:
+        evt = db.get_event_by_id(event_id)
+        if not evt:
+            raise HTTPException(status_code=404, detail="Message not found")
+        
+        kp = resolve_keypair(x_nostr_privkey)
+        if evt["pubkey"] != kp.public_key_hex:
+            raise HTTPException(status_code=403, detail="Permission denied: You can only unsend your own messages")
+        
+        # Check 2-minute (120-second) window
+        import time
+        now = int(time.time())
+        if now - evt["created_at"] > 120:
+            raise HTTPException(status_code=400, detail="Unsend window expired: Messages can only be un-sent within 2 minutes")
+        
+        deleted = db.delete_event(event_id)
+        return {
+            "status": "SUCCESS",
+            "message": "Message un-sent successfully",
+            "event_id": event_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "error": str(e)
+        }
+
+
 @router.post("/encode")
 async def api_encode(
     file: UploadFile = File(...),
     message: str = Form(...),
     robustness: str = Form("balanced"),
-    mode: str = Form("auto")
+    mode: str = Form("auto"),
+    sender_privkey: Optional[str] = Form(None),
+    x_nostr_privkey: Optional[str] = Header(None)
 ) -> Dict[str, Any]:
     try:
         contents = await file.read()
         img = Image.open(io.BytesIO(contents))
         
-        kp = db.get_active_identity()
+        kp = resolve_keypair(sender_privkey or x_nostr_privkey)
         evt = NostrEvent.create_text_note(kp, message)
         payload_bytes = json.dumps(evt.to_dict()).encode("utf-8")
 
@@ -106,9 +163,14 @@ async def api_encode(
         stego_img = res.pop("stego_image", None)
         if stego_img:
             buf = io.BytesIO()
-            stego_img.save(buf, format="PNG")
+            if mode == "legacy" or mode == "png":
+                stego_img.save(buf, format="PNG")
+                mime = "image/png"
+            else:
+                stego_img.save(buf, format="JPEG", quality=95, subsampling=0)
+                mime = "image/jpeg"
             b64_out = base64.b64encode(buf.getvalue()).decode('utf-8')
-            res["stego_image_base64"] = f"data:image/png;base64,{b64_out}"
+            res["stego_image_base64"] = f"data:{mime};base64,{b64_out}"
 
         return res
     except Exception as e:
@@ -119,7 +181,10 @@ async def api_encode(
 
 
 @router.post("/decode")
-async def api_decode(file: UploadFile = File(...)) -> Dict[str, Any]:
+async def api_decode(
+    file: UploadFile = File(...),
+    x_nostr_privkey: Optional[str] = Header(None)
+) -> Dict[str, Any]:
     try:
         contents = await file.read()
         img = Image.open(io.BytesIO(contents))
@@ -142,7 +207,7 @@ async def api_decode(file: UploadFile = File(...)) -> Dict[str, Any]:
                     res["valid_signature"] = evt.verify()
                     
                     if evt.kind == 4:
-                        kp = db.get_active_identity()
+                        kp = resolve_keypair(x_nostr_privkey)
                         try:
                             res["message"] = decrypt_dm(kp, evt)
                         except Exception:
@@ -200,9 +265,9 @@ async def api_benchmark(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 
 @router.post("/messages")
-def api_post_message(req: PostMessageRequest) -> Dict[str, Any]:
+def api_post_message(req: PostMessageRequest, x_nostr_privkey: Optional[str] = Header(None)) -> Dict[str, Any]:
     try:
-        kp = db.get_active_identity()
+        kp = resolve_keypair(x_nostr_privkey)
         evt = encrypt_dm(kp, req.recipient, req.text)
         db.save_event(evt)
         return {
@@ -218,9 +283,9 @@ def api_post_message(req: PostMessageRequest) -> Dict[str, Any]:
 
 
 @router.get("/messages")
-def api_get_messages() -> List[Dict[str, Any]]:
-    kp = db.get_active_identity()
-    raw_events = db.get_events(kind=4, limit=100)
+def api_get_messages(x_nostr_privkey: Optional[str] = Header(None)) -> List[Dict[str, Any]]:
+    kp = resolve_keypair(x_nostr_privkey)
+    raw_events = db.get_events(kind=4, limit=100) or []
     messages = []
     for item in raw_events:
         item_copy = dict(item)
@@ -236,9 +301,9 @@ def api_get_messages() -> List[Dict[str, Any]]:
 
 
 @router.get("/feed")
-def api_get_feed(limit: int = 50) -> List[Dict[str, Any]]:
-    kp = db.get_active_identity()
-    raw_events = db.get_events(limit=limit)
+def api_get_feed(limit: int = 50, x_nostr_privkey: Optional[str] = Header(None)) -> List[Dict[str, Any]]:
+    kp = resolve_keypair(x_nostr_privkey)
+    raw_events = db.get_events(limit=limit) or []
     processed = []
 
     for item in raw_events:

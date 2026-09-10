@@ -25,12 +25,15 @@
   font-family: var(--font-mono);
 }
 
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   background-color: var(--bg-deep);
   color: var(--text-main);
-  min-height: 100vh;
   position: relative;
-  overflow-x: hidden;
 }
 
 /* CRT Scanline Overlay Effect */
@@ -48,18 +51,22 @@ body::before {
 
 .app-layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
-/* Sidebar */
+/* Sidebar (Pinned / Sticky) */
 .sidebar {
   width: 290px;
+  height: 100vh;
   background-color: var(--bg-terminal);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   padding: 20px;
   box-shadow: 5px 0 20px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+  overflow-y: auto;
 }
 
 .brand {
@@ -161,12 +168,34 @@ body::before {
   margin-bottom: 10px;
 }
 
-/* Main Content */
+/* Main Content (Independently Scrollable) */
 .main-content {
   flex: 1;
+  height: 100vh;
   padding: 30px;
   overflow-y: auto;
   background: radial-gradient(circle at top right, rgba(0, 253, 255, 0.03), transparent 60%);
+}
+
+.main-content::-webkit-scrollbar,
+.sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.main-content::-webkit-scrollbar-track,
+.sidebar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.main-content::-webkit-scrollbar-thumb,
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 157, 0.25);
+  border-radius: 3px;
+}
+
+.main-content::-webkit-scrollbar-thumb:hover,
+.sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--term-green);
 }
 
 .header-bar {

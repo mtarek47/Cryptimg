@@ -1,8 +1,10 @@
-// Stegstr Web Dashboard Controller — Terminal Console Edition
+// Crypt Web Dashboard Controller — Terminal Console Edition
 
-document.addEventListener("DOMContentLoaded", () => {
+let currentIdentity = null;
+
+document.addEventListener("DOMContentLoaded", async () => {
   initTabs();
-  loadStatus();
+  await initSessionIdentity();
   loadFeed();
   loadRelays();
   setupFeedHandlers();
@@ -14,6 +16,52 @@ document.addEventListener("DOMContentLoaded", () => {
   setupCopyNpubHandler();
   loadDMInbox();
 });
+
+async function initSessionIdentity(forceNew = false) {
+  if (!forceNew) {
+    const saved = localStorage.getItem("crypt_session_identity");
+    if (saved) {
+      try {
+        currentIdentity = JSON.parse(saved);
+        if (currentIdentity && currentIdentity.npub && currentIdentity.privkey) {
+          updateIdentityUI(currentIdentity);
+          return currentIdentity;
+        }
+      } catch (e) {
+        console.error("Failed to parse saved identity", e);
+      }
+    }
+  }
+
+  try {
+    const res = await fetch("/api/v1/identity/new", { method: "POST" });
+    const data = await res.json();
+    currentIdentity = data;
+    localStorage.setItem("crypt_session_identity", JSON.stringify(data));
+    updateIdentityUI(currentIdentity);
+    return currentIdentity;
+  } catch (err) {
+    console.error("Failed to generate session identity", err);
+    loadStatus();
+  }
+}
+
+function updateIdentityUI(idObj) {
+  if (!idObj) return;
+  const display = document.getElementById("display-npub");
+  if (display) {
+    display.innerText = idObj.npub;
+    display.title = idObj.npub;
+  }
+}
+
+function getAuthHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (currentIdentity && currentIdentity.privkey) {
+    headers["X-Nostr-Privkey"] = currentIdentity.privkey;
+  }
+  return headers;
+}
 
 function initTabs() {
   const navItems = document.querySelectorAll(".nav-item");
@@ -46,9 +94,9 @@ function switchTab(tabId) {
 
 async function loadStatus() {
   try {
-    const res = await fetch("/api/v1/status");
+    const res = await fetch("/api/v1/status", { headers: getAuthHeaders() });
     const data = await res.json();
-    if (data.identity) {
+    if (data.identity && !currentIdentity) {
       document.getElementById("display-npub").innerText = data.identity.npub;
     }
   } catch (err) {
@@ -56,10 +104,12 @@ async function loadStatus() {
   }
 }
 
+let unsendInterval = null;
+
 async function loadFeed() {
   const container = document.getElementById("feed-posts-list");
   try {
-    const res = await fetch("/api/v1/feed");
+    const res = await fetch("/api/v1/feed", { headers: getAuthHeaders() });
     const posts = await res.json();
 
     if (!posts || posts.length === 0) {
@@ -69,11 +119,22 @@ async function loadFeed() {
 
     container.innerHTML = posts.map(p => {
       const displayMsg = p.decrypted_content || p.content;
+      const secondsPassed = Math.floor(Date.now() / 1000 - p.created_at);
+      const hoursLeft = Math.max(1, Math.ceil((86400 - secondsPassed) / 3600));
+
+      const isOwner = currentIdentity && currentIdentity.pubkey && p.pubkey.toLowerCase() === currentIdentity.pubkey.toLowerCase();
+      const unsendRemaining = 120 - secondsPassed;
+      const canUnsend = isOwner && unsendRemaining > 0;
+
       return `
-        <div class="card">
+        <div class="card" id="post-card-${p.id}">
           <div style="font-size:11px; color:var(--term-cyan); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
             <span>From: <code>${p.pubkey.substring(0, 16)}...</code> | ${new Date(p.created_at * 1000).toLocaleString()}</span>
-            ${p.is_dm ? `<span class="badge badge-success" style="float:right;">🔒 ENCRYPTED DM (KIND 4)</span>` : ''}
+            <div style="display:flex; align-items:center;">
+              <span class="badge" style="border-color:var(--term-amber); color:var(--term-amber); font-size:10px; margin-right:6px;">⏱️ EXPIRES IN ${hoursLeft}H</span>
+              ${canUnsend ? `<button class="btn-sm btn-unsend-action" data-id="${p.id}" data-remain="${unsendRemaining}" style="border:1px solid var(--term-red); background:rgba(255,51,102,0.1); color:var(--term-red); font-size:10px; padding:2px 8px; border-radius:4px; margin-right:6px; cursor:pointer;" title="Unsend message within 2 minutes">↩️ UNSEND (${unsendRemaining}s)</button>` : ''}
+              ${p.is_dm ? `<span class="badge badge-success">🔒 ENCRYPTED DM (KIND 4)</span>` : ''}
+            </div>
           </div>
           <p style="color:var(--term-green); font-size:14px; margin-top:6px;">${displayMsg}</p>
           ${p.carrier_path ? `<div style="margin-top:10px;"><small class="badge badge-success">🖼️ STEGANOGRAPHIC CARRIER ATTACHED</small></div>` : ''}
@@ -81,9 +142,57 @@ async function loadFeed() {
       `;
     }).join("");
 
+    setupUnsendButtons();
+
   } catch (err) {
     container.innerHTML = `<div class="card"><p style="color:var(--term-red);">[SYS_ERR] Failed to load timeline feed.</p></div>`;
   }
+}
+
+function setupUnsendButtons() {
+  document.querySelectorAll(".btn-unsend-action").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const eventId = btn.getAttribute("data-id");
+      if (!confirm("Are you sure you want to unsend this message?")) return;
+      btn.disabled = true;
+      btn.innerText = "↩️ UNSENDING...";
+      try {
+        const res = await fetch(`/api/v1/posts/${eventId}/unsend`, {
+          method: "POST",
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (data.status === "SUCCESS") {
+          loadFeed();
+        } else {
+          alert("Could not unsend: " + (data.detail || data.error || "Unknown error"));
+          loadFeed();
+        }
+      } catch (err) {
+        alert("Unsend request failed: " + err.message);
+      }
+    });
+  });
+
+  if (unsendInterval) clearInterval(unsendInterval);
+  unsendInterval = setInterval(() => {
+    const unsendBtns = document.querySelectorAll(".btn-unsend-action");
+    if (unsendBtns.length === 0) {
+      clearInterval(unsendInterval);
+      unsendInterval = null;
+      return;
+    }
+    unsendBtns.forEach(btn => {
+      let remain = parseInt(btn.getAttribute("data-remain"), 10) - 1;
+      if (remain <= 0) {
+        btn.remove();
+      } else {
+        btn.setAttribute("data-remain", remain);
+        btn.innerText = `↩️ UNSEND (${remain}s)`;
+      }
+    });
+  }, 1000);
 }
 
 function setupFeedHandlers() {
@@ -101,7 +210,7 @@ function setupFeedHandlers() {
     try {
       const res = await fetch("/api/v1/posts", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ text })
       });
       const data = await res.json();
@@ -122,7 +231,7 @@ async function loadDMInbox() {
   if (!container) return;
 
   try {
-    const res = await fetch("/api/v1/messages");
+    const res = await fetch("/api/v1/messages", { headers: getAuthHeaders() });
     const messages = await res.json();
 
     if (!messages || messages.length === 0) {
@@ -206,7 +315,8 @@ function setupEmbedHandlers() {
     }
   });
 
-  document.getElementById("btn-embed-action").addEventListener("click", async () => {
+  const btnEmbed = document.getElementById("btn-embed-action");
+  btnEmbed.addEventListener("click", async () => {
     if (!selectedFile) {
       alert("Please select a cover carrier image first.");
       return;
@@ -222,8 +332,16 @@ function setupEmbedHandlers() {
     formData.append("message", text);
     formData.append("robustness", document.getElementById("embed-robustness").value);
 
+    btnEmbed.disabled = true;
+    const prevText = btnEmbed.innerText;
+    btnEmbed.innerText = "⏳ ENCODING CARRIER...";
+
     try {
-      const res = await fetch("/api/v1/encode", { method: "POST", body: formData });
+      const res = await fetch("/api/v1/encode", { method: "POST", headers: getAuthHeaders(), body: formData });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Server returned HTTP ${res.status}: ${errorText.substring(0, 100)}`);
+      }
       const data = await res.json();
 
       if (data.status === "SUCCESS") {
@@ -234,12 +352,17 @@ function setupEmbedHandlers() {
         
         const link = document.getElementById("res-download-link");
         link.href = data.stego_image_base64;
-        link.download = `stego_${selectedFile.name}`;
+        const outExt = data.stego_image_base64 && data.stego_image_base64.startsWith("data:image/jpeg") ? "jpg" : "png";
+        const baseName = selectedFile.name.substring(0, selectedFile.name.lastIndexOf('.')) || selectedFile.name;
+        link.download = `stego_${baseName}.${outExt}`;
       } else {
         alert("Encoding failed: " + (data.error || "Unknown error"));
       }
     } catch (err) {
-      alert("Embedding request failed: " + err);
+      alert("Embedding request failed: " + err.message);
+    } finally {
+      btnEmbed.disabled = false;
+      btnEmbed.innerText = prevText;
     }
   });
 }
@@ -257,6 +380,7 @@ function showEmbedPreview(file) {
 function setupDetectHandlers() {
   const dropzone = document.getElementById("detect-dropzone");
   const fileInput = document.getElementById("detect-file-input");
+  const dropzoneText = dropzone.querySelector(".dropzone-text");
 
   dropzone.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", async (e) => {
@@ -265,8 +389,15 @@ function setupDetectHandlers() {
       const formData = new FormData();
       formData.append("file", file);
 
+      const originalText = dropzoneText ? dropzoneText.innerText : "";
+      if (dropzoneText) dropzoneText.innerText = "⏳ SCANNING IMAGE FOR PAYLOAD...";
+
       try {
-        const res = await fetch("/api/v1/decode", { method: "POST", body: formData });
+        const res = await fetch("/api/v1/decode", { method: "POST", headers: getAuthHeaders(), body: formData });
+        if (!res.ok) {
+          const errorText = await res.text();
+          throw new Error(`Server returned HTTP ${res.status}: ${errorText.substring(0, 100)}`);
+        }
         const data = await res.json();
 
         const card = document.getElementById("detect-results-card");
@@ -276,7 +407,7 @@ function setupDetectHandlers() {
 
         if (data.status === "FOUND") {
           badge.className = "badge badge-success";
-          badge.innerText = "✅ STEGSTR PAYLOAD FOUND";
+          badge.innerText = "✅ CRYPT PAYLOAD FOUND";
           details.innerHTML = `
             <p style="margin-bottom:6px;"><strong>Codec:</strong> ${data.codec}</p>
             <p style="margin-bottom:6px;"><strong>Sender:</strong> <code style="color:var(--term-cyan);">${data.sender || 'Unknown'}</code></p>
@@ -285,11 +416,13 @@ function setupDetectHandlers() {
         } else {
           badge.className = "badge badge-error";
           badge.innerText = "❌ NO PAYLOAD DETECTED";
-          details.innerHTML = `<p style="color:var(--text-muted);">No Stegstr payload was found inside this image.</p>`;
+          details.innerHTML = `<p style="color:var(--text-muted);">No Crypt payload was found inside this image.</p>`;
         }
 
       } catch (err) {
-        alert("Detection request failed: " + err);
+        alert("Detection request failed: " + err.message);
+      } finally {
+        if (dropzoneText) dropzoneText.innerText = originalText || "Upload or drag & drop carrier image to scan";
       }
     }
   });
@@ -378,7 +511,7 @@ function setupMessagesHandlers() {
     try {
       const res = await fetch("/api/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ recipient, text })
       });
       const data = await res.json();
@@ -399,12 +532,26 @@ function setupMessagesHandlers() {
 
 function setupCopyNpubHandler() {
   const btn = document.getElementById("btn-copy-npub");
-  if (!btn) return;
-  btn.addEventListener("click", () => {
-    const text = document.getElementById("display-npub").innerText;
-    navigator.clipboard.writeText(text).then(() => {
-      btn.innerText = "COPIED!";
-      setTimeout(() => btn.innerText = "COPY NPUB KEY", 2000);
+  if (btn) {
+    btn.addEventListener("click", () => {
+      const text = currentIdentity ? currentIdentity.npub : document.getElementById("display-npub").innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.innerText = "COPIED!";
+        setTimeout(() => btn.innerText = "COPY NPUB KEY", 2000);
+      });
     });
-  });
+  }
+
+  const newBtn = document.getElementById("btn-new-identity");
+  if (newBtn) {
+    newBtn.addEventListener("click", async () => {
+      newBtn.disabled = true;
+      newBtn.innerText = "⏳ GENERATING...";
+      await initSessionIdentity(true);
+      await loadFeed();
+      await loadDMInbox();
+      newBtn.disabled = false;
+      newBtn.innerText = "🔄 NEW IDENTITY";
+    });
+  }
 }

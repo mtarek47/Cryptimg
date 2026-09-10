@@ -5,6 +5,7 @@ Handles local persistence for Nostr identities, events, relay states,
 offline message queue, and steganography benchmark history.
 """
 
+import time
 import json
 import sqlite3
 from typing import Dict, Any, List, Optional
@@ -145,13 +146,25 @@ class DatabaseManager:
             ))
             conn.commit()
 
-    def get_events(self, kind: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+    def cleanup_expired_events(self, max_age_seconds: int = 86400) -> int:
+        """Purge events older than max_age_seconds (default 24 hours)."""
+        cutoff = int(time.time()) - max_age_seconds
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM events WHERE created_at < ?", (cutoff,))
+            deleted = cursor.rowcount
+            conn.commit()
+        return deleted
+
+    def get_events(self, kind: Optional[int] = None, limit: int = 50, max_age_seconds: int = 86400) -> List[Dict[str, Any]]:
+        self.cleanup_expired_events(max_age_seconds)
+        cutoff = int(time.time()) - max_age_seconds
         with self._get_conn() as conn:
             cursor = conn.cursor()
             if kind is not None:
-                cursor.execute("SELECT * FROM events WHERE kind = ? ORDER BY created_at DESC LIMIT ?", (kind, limit))
+                cursor.execute("SELECT * FROM events WHERE kind = ? AND created_at >= ? ORDER BY created_at DESC LIMIT ?", (kind, cutoff, limit))
             else:
-                cursor.execute("SELECT * FROM events ORDER BY created_at DESC LIMIT ?", (limit,))
+                cursor.execute("SELECT * FROM events WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?", (cutoff, limit))
             rows = cursor.fetchall()
             results = []
             for r in rows:
@@ -167,6 +180,34 @@ class DatabaseManager:
                     "carrier_path": r["carrier_path"]
                 })
             return results
+
+    def get_event_by_id(self, event_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM events WHERE id = ? LIMIT 1", (event_id,))
+            r = cursor.fetchone()
+            if not r:
+                return None
+            return {
+                "id": r["id"],
+                "pubkey": r["pubkey"],
+                "kind": r["kind"],
+                "created_at": r["created_at"],
+                "content": r["content"],
+                "tags": json.loads(r["tags"]),
+                "sig": r["sig"],
+                "synced": bool(r["synced"]),
+                "carrier_path": r["carrier_path"]
+            }
+
+    def delete_event(self, event_id: str) -> bool:
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM events WHERE id = ?", (event_id,))
+            cursor.execute("DELETE FROM offline_queue WHERE id = ?", (event_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
 
     # Relay Management
     def get_relays(self) -> List[Dict[str, Any]]:
